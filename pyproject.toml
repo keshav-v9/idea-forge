@@ -1,0 +1,19 @@
+[project]
+name = "idea-forge"
+version = "0.1.0"
+description = "Brainstorm startup ideas with structured methods, then have a council of LLMs try to kill them."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+ideaforge = "ideaforge.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["ideaforge"]
