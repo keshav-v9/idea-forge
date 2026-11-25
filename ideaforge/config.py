@@ -47,6 +47,7 @@ class Settings:
     brainstorm_model: str = DEFAULT_BRAINSTORM_MODEL
     max_concurrency: int = 6
     timeout: float = 180.0
+    max_tokens: int = 12000  # OpenRouter reserves credit for the full amount on every call
 
     @classmethod
     def from_env(cls) -> "Settings":

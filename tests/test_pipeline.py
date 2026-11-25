@@ -129,7 +129,7 @@ def test_cli_end_to_end_mock(tmp_path, monkeypatch, capsys):
     profile = tmp_path / "p.txt"
     profile.write_text("CS + econ student")
     assert main(["run", "--mock", "--profile", str(profile), "--pick", "1,2", "--out", "runs"]) == 0
-    run_dir = next(Path("runs").iterdir())
+    run_dir = next(Path("runs").glob("*/session.json")).parent
     assert (run_dir / "report.md").is_file() and (run_dir / "session.json").is_file()
     data = json.loads((run_dir / "session.json").read_text())
     assert data["picks"] == [1, 2] and len(data["council"]) == 2

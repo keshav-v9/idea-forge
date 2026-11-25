@@ -25,12 +25,20 @@ def render(session: Session) -> str:
 
     out += ["", "## Rulings"]
     for idea, res in ranked:
-        out += ["", f"### {idea.title}", f"*{idea.pitch}*  ", f"Sources: {', '.join(idea.sources) or 'n/a'}", ""]
+        out += ["", f"### {idea.title}", f"*{idea.pitch}*", "", idea.description, "", f"Sources: {', '.join(idea.sources) or 'n/a'}", ""]
         if res.get("error"):
             out += [f"Council failed: {res['error']}"]
             continue
         ch = res.get("chairman")
         out += [ch["text"].strip().replace("### ", "#### ") if ch else "_Chairman did not respond._", ""]
+        angles = res.get("angles", [])
+        if angles:
+            out += ["#### Scores by angle", "", "| Angle | Score |", "|---|---|"]
+            out += [f"| {a['name']} | {_fmt(a['score'])} |" for a in angles]
+            out += ["", "<details><summary>Specialist reports</summary>", ""]
+            for a in angles:
+                out += [f"**{a['name']}** ({a['model']})", "", a["text"].strip(), ""]
+            out += ["</details>", ""]
         out += ["<details><summary>Individual member assessments</summary>", ""]
         for op in res.get("opinions", []):
             out += [f"**{op['model']}** ({_fmt(op['verdict'])} {_fmt(op['score'])})", "", op["text"].strip(), ""]

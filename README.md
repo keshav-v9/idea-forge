@@ -37,9 +37,27 @@ Tips for good output:
 - Say what you do **not** want to build. It prunes a lot of noise.
 - Read the council's "where the panel disagreed" section first. That is usually the real risk.
 
+## Web UI
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[ui]"
+streamlit run streamlit_app.py
+```
+
+The UI also lets you revise the idea list with plain-language feedback and choose which specialists review each idea.
+
+## Saved data
+
+Everything stays in `runs/`, which git ignores: `runs/<timestamp>-<name>/` holds each idea list, brief, revision request, and report; `runs/calls/` logs every prompt and model response as it arrives; `runs/profile.json` remembers your last profile. Open past runs from the app's sidebar.
+
+## Specialists
+
+Besides the general council, eight agents each examine one angle: long-term growth and market feasibility, customer demand, competition, unit economics, go-to-market, technical feasibility, legal risk, and founder fit. The chairman weighs their reports in the ruling.
+
 ## Cost
 
-Per shortlisted idea the council makes `2 x (council size) + 1` calls (9 with the default 4 models), plus one call for the overall recommendation. Brainstorming is about 6 calls. A typical run with 3 shortlisted ideas is roughly 35 calls. Expect a few dollars at most, depending on the models you choose. Check pricing on OpenRouter.
+Per shortlisted idea the council makes `2 x (council size) + (specialists) + 1` calls (17 with the default 4 models and all 8 specialists), plus one call for the overall recommendation. Brainstorming is about 5 calls and each brief is one. A typical run with 3 shortlisted ideas is roughly 60 calls. Expect a few dollars at most, depending on the models you choose. Check pricing on OpenRouter.
 
 ## Limits
 

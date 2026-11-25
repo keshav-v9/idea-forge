@@ -10,6 +10,7 @@ import random
 import re
 import statistics
 
+from .angles import ANGLES, angle_prompt, parse_angle_score
 from .config import Settings
 from .llm import LLM
 from .session import Idea, Session
@@ -76,7 +77,10 @@ FINAL RANKING:
 (and so on, one per line, nothing else after the list)"""
 
 
-def _chairman_prompt(profile: str, idea: Idea, opinions: list[dict], reviews: list[dict]) -> str:
+def _chairman_prompt(
+    profile: str, idea: Idea, opinions: list[dict], reviews: list[dict], angles: list[dict]
+) -> str:
+    specialists = "\n\n".join(f"[{a['name']}] (score {a['score']})\n{a['text']}" for a in angles) or "None."
     ops = "\n\n".join(f"[{o['model']}] (verdict {o['verdict']}, score {o['score']})\n{o['text']}" for o in opinions)
     revs = "\n\n".join(f"[{r['model']}]\n{r['text']}" for r in reviews)
     return f"""You chair a startup review panel. Members assessed an idea, then critiqued each other's assessments.
@@ -93,30 +97,54 @@ MEMBER ASSESSMENTS
 PEER CRITIQUES
 {revs}
 
+SPECIALIST REPORTS (one angle each)
+{specialists}
+
 Write the panel's final ruling in Markdown with these sections:
 ### Decision (one sentence)
 ### Top three reasons it could fail
 ### Strongest case for it
+### Long-term growth and market feasibility
+### What the specialists found (strongest and weakest angles)
 ### Where the panel disagreed
 ### Cheapest test and what result would count as a pass
 ### What would change the panel's mind
 
-Weigh the critiques; do not simply average the members. Finish with exactly one last line:
+Weigh the critiques and specialist reports; do not simply average scores. One fatal angle can sink an idea. Finish with exactly one last line:
 VERDICT: <GO|MAYBE|NO-GO> | SCORE: <number from 1 to 10>"""
 
 
-async def run_idea(llm: LLM, settings: Settings, profile: str, idea: Idea) -> dict:
+async def run_angles(llm: LLM, settings: Settings, profile: str, idea: Idea, keys: list[str]) -> list[dict]:
     models = settings.council_models
 
-    # Stage 1: independent opinions
-    raw = await asyncio.gather(*(llm.complete(m, _opinion_prompt(profile, idea), task="council_s1") for m in models))
+    async def one(n: int, key: str) -> dict | None:
+        model = models[n % len(models)]
+        text = await llm.complete(model, angle_prompt(key, profile, idea), task=f"angle:{key}")
+        if not text:
+            return None
+        return {"key": key, "name": ANGLES[key][0], "model": model, "text": text, "score": parse_angle_score(text)}
+
+    return [a for a in await asyncio.gather(*(one(n, k) for n, k in enumerate(keys))) if a]
+
+
+async def run_idea(
+    llm: LLM, settings: Settings, profile: str, idea: Idea, angle_keys: list[str] | None = None
+) -> dict:
+    models = settings.council_models
+    keys = list(ANGLES) if angle_keys is None else angle_keys
+
+    # Stage 1: independent opinions, with the specialists alongside
+    raw, angles = await asyncio.gather(
+        asyncio.gather(*(llm.complete(m, _opinion_prompt(profile, idea), task="council_s1") for m in models)),
+        run_angles(llm, settings, profile, idea, keys),
+    )
     opinions = []
     for model, text in zip(models, raw):
         if text:
             verdict, score = parse_verdict(text)
             opinions.append({"model": model, "text": text, "verdict": verdict, "score": score})
     if not opinions:
-        return {"error": "no council member responded", "opinions": [], "reviews": [], "chairman": None}
+        return {"error": "no council member responded", "opinions": [], "reviews": [], "angles": angles, "chairman": None}
 
     # Stage 2: anonymized peer review (labels shuffled deterministically per idea)
     order = list(range(len(opinions)))
@@ -142,7 +170,7 @@ async def run_idea(llm: LLM, settings: Settings, profile: str, idea: Idea) -> di
 
     # Stage 3: chairman
     text = await llm.complete(
-        settings.chairman, _chairman_prompt(profile, idea, opinions, reviews), task="council_s3"
+        settings.chairman, _chairman_prompt(profile, idea, opinions, reviews, angles), task="council_s3"
     )
     chairman = None
     if text:
@@ -153,6 +181,7 @@ async def run_idea(llm: LLM, settings: Settings, profile: str, idea: Idea) -> di
     return {
         "opinions": opinions,
         "reviews": reviews,
+        "angles": angles,
         "aggregate_rankings": aggregate,
         "chairman": chairman,
         "mean_score": round(statistics.mean(scores), 2) if scores else None,
@@ -160,9 +189,13 @@ async def run_idea(llm: LLM, settings: Settings, profile: str, idea: Idea) -> di
     }
 
 
-async def run_council(llm: LLM, settings: Settings, session: Session) -> None:
+async def run_council(
+    llm: LLM, settings: Settings, session: Session, angle_keys: list[str] | None = None
+) -> None:
     ideas = [session.idea(i) for i in session.picks]
-    results = await asyncio.gather(*(run_idea(llm, settings, session.profile, idea) for idea in ideas))
+    results = await asyncio.gather(
+        *(run_idea(llm, settings, session.profile, idea, angle_keys) for idea in ideas)
+    )
     for idea, result in zip(ideas, results):
         session.council[str(idea.id)] = result
     session.overall = await overall_recommendation(llm, settings, session)
@@ -185,7 +218,8 @@ async def overall_recommendation(llm: LLM, settings: Settings, session: Session)
         ch = res.get("chairman") or {}
         lines.append(
             f"- {idea.title}: chairman {ch.get('verdict')} / {ch.get('score')}, "
-            f"member mean {res.get('mean_score')}, votes {res.get('verdict_counts')}\n"
+            f"member mean {res.get('mean_score')}, votes {res.get('verdict_counts')}, "
+            f"angle scores {({a['name']: a['score'] for a in res.get('angles', [])})}\n"
             f"  Ruling excerpt: {(ch.get('text') or '')[:600]}"
         )
     prompt = f"""You chair a startup review panel that has ruled on several ideas for one founder.

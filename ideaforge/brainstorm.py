@@ -6,7 +6,7 @@ import json
 
 from .config import Settings
 from .llm import LLM
-from .methods import GENERATION_METHODS, curate_prompt, generation_prompt, refine_prompt
+from .methods import GENERATION_METHODS, curate_prompt, generation_prompt, refine_prompt, revise_prompt
 from .session import Idea, Session
 from .util import extract_json
 
@@ -19,6 +19,7 @@ def _coerce(item: dict, sources: list[str]) -> dict | None:
     return {
         "title": title,
         "pitch": pitch,
+        "description": str(item.get("description", "")).strip(),
         "customer": str(item.get("customer", "")).strip(),
         "problem": str(item.get("problem", "")).strip(),
         "sources": [str(s) for s in item.get("sources", sources)] or sources,
@@ -77,21 +78,38 @@ async def run_brainstorm(
     methods = methods or list(GENERATION_METHODS)
     pool = await generate_pool(llm, settings, profile, methods, per_method)
     if not pool:
-        raise RuntimeError("No ideas were generated. Check your API key and model IDs (`python -m ideaforge check`).")
+        reason = getattr(llm, "last_error", "") or "The models returned nothing usable."
+        raise RuntimeError(f"No ideas were generated. {reason}")
     curated = await curate(llm, settings, profile, pool, keep)
     ideas = [Idea(id=i, **c) for i, c in enumerate(curated, start=1)]
     return Session(profile=profile, ideas=ideas)
+
+
+async def revise_ideas(llm: LLM, settings: Settings, session: Session, feedback: str) -> None:
+    """Rewrite session.ideas per the feedback. Leaves the session untouched if the model fails."""
+    keys = ("title", "pitch", "description", "customer", "problem", "sources")
+    current = [{k: getattr(i, k) for k in keys} for i in session.ideas]
+    prompt = revise_prompt(session.profile, json.dumps(current, indent=1), feedback, len(current))
+    data = extract_json(await llm.complete(settings.brainstorm_model, prompt, task="revise") or "")
+    items = data if isinstance(data, list) else []
+    cleaned = [c for c in (_coerce(i, ["revised"]) for i in items if isinstance(i, dict)) if c]
+    if not cleaned:
+        reason = getattr(llm, "last_error", "") or "The model did not return a usable revision."
+        raise RuntimeError(f"Your list is unchanged. {reason}")
+    session.ideas = [Idea(id=i, **c) for i, c in enumerate(cleaned, start=1)]
+    session.picks, session.council, session.overall = [], {}, ""
+    session.feedback.append(feedback)
 
 
 async def refine_picks(llm: LLM, settings: Settings, session: Session) -> None:
     async def one(idea: Idea) -> None:
         text = await llm.complete(
             settings.brainstorm_model,
-            refine_prompt(session.profile, idea.title, idea.pitch, idea.customer, idea.problem),
+            refine_prompt(session.profile, idea.title, idea.pitch, idea.customer, idea.problem, idea.description),
             task="refine",
         )
         # If refinement fails, the council still gets the raw pitch rather than nothing.
-        idea.brief = (text or "").strip() or f"{idea.pitch}\n\nCustomer: {idea.customer}\nProblem: {idea.problem}"
+        idea.brief = (text or "").strip() or f"{idea.pitch}\n\n{idea.description}\n\nCustomer: {idea.customer}\nProblem: {idea.problem}"
 
     todo = [session.idea(i) for i in session.picks if not session.idea(i).brief]  # skip briefs already written
     await asyncio.gather(*(one(idea) for idea in todo))

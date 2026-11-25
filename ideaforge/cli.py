@@ -4,9 +4,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import datetime
 from pathlib import Path
 
+from .angles import ANGLES, council_calls
 from .brainstorm import refine_picks, run_brainstorm
 from .config import Settings
 from .council import run_council
@@ -15,7 +15,8 @@ from .methods import GENERATION_METHODS
 from .mock import MockLLM
 from .report import render
 from .session import Session
-from .util import parse_selection, slugify
+from .storage import RecordingLLM, new_run_dir
+from .util import parse_selection
 
 PROFILE_QUESTIONS = [
     ("Your background and strengths (skills, experience, unfair advantages)", ""),
@@ -25,7 +26,7 @@ PROFILE_QUESTIONS = [
 
 
 def _client(settings: Settings, mock: bool) -> LLM:
-    return MockLLM() if mock else OpenRouterClient(settings)
+    return RecordingLLM(MockLLM() if mock else OpenRouterClient(settings))
 
 
 def _ask_profile(path: str | None) -> str:
@@ -42,7 +43,7 @@ def _ask_profile(path: str | None) -> str:
 def _show_ideas(session: Session) -> None:
     print()
     for i in session.ideas:
-        print(f"{i.id:>2}. {i.title}  [{', '.join(i.sources)}]\n    {i.pitch}\n    Customer: {i.customer} | Problem: {i.problem}")
+        print(f"{i.id:>2}. {i.title}  [{', '.join(i.sources)}]\n    {i.pitch}\n    {i.description}\n    Customer: {i.customer} | Problem: {i.problem}")
     print()
 
 
@@ -67,12 +68,8 @@ def _choose(session: Session, pick: str | None, assume_yes: bool, max_picks: int
             return picks
 
 
-def _new_run_dir(root: str, tag: str) -> Path:
-    return Path(root) / f"{datetime.now():%Y%m%d-%H%M%S}-{slugify(tag)}"
-
-
 async def _council_and_report(llm: LLM, settings: Settings, session: Session, out_dir: Path) -> Path:
-    calls = len(session.picks) * (2 * len(settings.council_models) + 1) + 1
+    calls = council_calls(len(session.picks), len(settings.council_models), len(ANGLES))
     print(f"\nRunning council on {len(session.picks)} idea(s): about {calls} model calls...")
     await run_council(llm, settings, session)
     session.save(out_dir)
@@ -93,7 +90,8 @@ async def cmd_run(args) -> int:
 
     print("\n[1/4] Brainstorming...")
     session = await run_brainstorm(llm, settings, profile, methods, args.per_method, args.keep)
-    out_dir = _new_run_dir(args.out, session.ideas[0].title if session.ideas else "run")
+    out_dir = new_run_dir(session.ideas[0].title, args.out)
+    session.mock = args.mock
     session.save(out_dir)
     _show_ideas(session)
 
@@ -113,7 +111,8 @@ async def cmd_brainstorm(args) -> int:
     settings = Settings.from_env()
     llm = _client(settings, args.mock)
     session = await run_brainstorm(llm, settings, _ask_profile(args.profile), None, args.per_method, args.keep)
-    out_dir = _new_run_dir(args.out, session.ideas[0].title)
+    out_dir = new_run_dir(session.ideas[0].title, args.out)
+    session.mock = args.mock
     session.save(out_dir)
     _show_ideas(session)
     print(f"Saved to {out_dir}. Next: ideaforge council {out_dir} --pick 1,3")

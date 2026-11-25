@@ -11,6 +11,7 @@ class Idea:
     id: int
     title: str
     pitch: str
+    description: str = ""
     customer: str = ""
     problem: str = ""
     sources: list[str] = field(default_factory=list)  # brainstorm methods that produced it
@@ -24,6 +25,8 @@ class Session:
     picks: list[int] = field(default_factory=list)  # idea ids
     council: dict = field(default_factory=dict)  # idea id (str) -> council result
     overall: str = ""
+    feedback: list[str] = field(default_factory=list)  # revision requests, oldest first
+    mock: bool = False
 
     def idea(self, idea_id: int) -> Idea:
         return next(i for i in self.ideas if i.id == idea_id)

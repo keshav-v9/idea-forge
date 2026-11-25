@@ -26,7 +26,7 @@ class MockLLM:
         if task.startswith("brainstorm:"):
             method = task.split(":", 1)[1]
             ideas = [
-                {"title": t, "pitch": f"{t}: saves its customer hours each week.", "customer": "small teams", "problem": "manual, error-prone busywork"}
+                {"title": t, "pitch": f"{t}: saves its customer hours each week.", "description": f"A small web app ({t.lower()}). Customers connect their tools and it handles the busywork.", "customer": "small teams", "problem": "manual, error-prone busywork"}
                 for t in _SEEDS[method]
             ]
             return "Here you go:\n```json\n" + json.dumps(ideas) + "\n```"
@@ -37,6 +37,13 @@ class MockLLM:
                 cur = merged.setdefault(item["title"], {**item, "sources": []})
                 cur["sources"] = sorted(set(cur["sources"]) | set(item.get("sources", [])))
             return json.dumps(list(merged.values()))
+        if task == "revise":
+            start = prompt.index("[", prompt.index("CURRENT IDEAS (JSON)"))
+            ideas, _ = json.JSONDecoder().raw_decode(prompt[start:])
+            ideas[0] = {**ideas[0], "title": ideas[0]["title"] + " (revised)", "sources": ["revised"]}
+            return json.dumps(ideas)
+        if task.startswith("angle:"):
+            return f"Mock {task.split(':', 1)[1]} analysis.\nANGLE SCORE: {3 + _h(task, prompt) % 6}"
         if task == "refine":
             return "## Customer and problem\nMock brief.\n## Riskiest assumptions\nCustomers will pay."
         if task == "council_s1":
